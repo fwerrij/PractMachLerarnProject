@@ -1,0 +1,111 @@
+# Introduction
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it.  
+Six young healthy male participants aged between 20-28 years, with little weight lifting experience, were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions: exactly according to the specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E).
+More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). 
+In this project our objective is to predict "how (well)" an activity was performed by the wearer using the Weight Lifting Exercises dataset. 
+
+# Data manipulation
+
+First download and read the training and test set:
+```{R data}
+setwd("C:/Users/nl22423/Documents/Cursussen/PractMachLearn/Project")
+
+if (!file.exists("./pml-training.csv")) {
+    download.file("http://d396qusza40orc.cloudfront.net/predmachlearn/
+    pml-training.csv", destfile = "./pml-training.csv")
+    }
+if (!file.exists("./pml-testing.csv")) {
+    download.file("http://d396qusza40orc.cloudfront.net/predmachlearn/
+    pml-testing.csv", destfile = "./pml-testing.csv")
+    }
+pml.training <-read.csv("pml-training.csv", header=TRUE)
+pml.testing <-read.csv("pml-testing.csv", header=TRUE)
+dim(pml.training)
+dim(pml.testing)
+# names(pml.training)
+unique(pml.training$classe)
+```
+# Data preprocessing
+
+First install/load the required packages.
+
+```{R load}
+# install.packages("caret")
+library(caret)
+```
+The data contain 160 covariates which I will reduce to 53 in the preproceccing phase. This will consist of 3 steps. All the steps applied to the training set will also be applied to the test set in order to keep them in sync.
+
+First I will remove all the covariates (columns) with mostly NA's:
+```{R NAs}
+mostlyNA <- sapply(pml.training, function(x) mean(is.na(x))) > 0.80
+pml.training1 <- pml.training[, mostlyNA==F]
+pml.testing1 <- pml.testing[, mostlyNA==F]
+```
+Secondly I will remove the covariates with zero or near zero variability:
+```{R nzv}
+nzv <- nearZeroVar(pml.training1)
+pml.training2 <- pml.training1[, -nzv]
+pml.testing2 <- pml.testing1[, -nzv]
+```
+As a third and last step I will remove column 1 to 6 representing covariates (X, user_name, raw_timestamp_part_1, raw_timestamp_part_2, cvtd_timestamp, num_window), with apparently no relation to the prediction problem.
+```{R redundant}
+pml.training3 <- pml.training2[, -(1:6)]
+pml.testing3 <- pml.testing2[, -(1:6)]
+```
+
+# Analysis
+
+The analysis will consist of Data partition, Model fit and Model Evaluation
+
+## Data Partition
+
+The first step in model building is the partition of the training data into a train and a test set.The test set will be used to test the out-of-sample error.
+```{R split}
+set.seed(10)
+inTrain <- createDataPartition(y=pml.training3$classe, p=0.7, list=F)
+pml.train <- pml.training3[inTrain, ]
+pml.test <- pml.training3[-inTrain, ]
+```
+## Model Fit
+
+I decided to use the Random Forest method with one time 3-fold cross-validation in order to avoid over-fit.I fit the model on the train set as developed in the described sequence.
+```{R fit}
+fitControl <- trainControl(method="cv", number=3, verboseIter=F)
+fit <- train(classe ~ ., data=pml.train, method="rf", trControl=fitControl)
+fit$finalModel
+```
+
+The in-sample training results are quite promising.
+
+## Model Evaluation
+
+Now I produce the predicted classe-values based on the split-off test set as developed in the described sequence and use them to produce the confusion matrix with the real values of the split-off test. This gives me an estimate of the out-of-sample error.
+
+```{R predict}
+predictions <- predict(fit, newdata=pml.test)
+confusionMatrix(pml.test$classe, predictions)
+```
+
+This gives an estimated accuracy of 99.3 % with an 95% Confidence Interval of (99.04%, 99.49%) with a P-Value < 2.2e-16.  The estimated out-of-sample error is < 0.3%. This result is more than satisfactory.
+
+# Final Results
+
+In order to conclude the project assignment I will use the model to produce the final predictions on the cleaned original test set. Finally I will prepare the submission by using the code as given in the assignment to produce the separate prediction sets.
+```{R final}
+finalpreds <- predict(fit, newdata=pml.testing3)
+# convert predictions to character vector
+finalpreds <- as.character(finalpreds)
+# create function to write predictions to files
+pml_write_files <- function(x) {
+    n <- length(x)
+    for(i in 1:n) {
+        filename <- paste0("problem_id_", i, ".txt")
+        write.table(x[i], file=filename, quote=F, row.names=F, col.names=F)
+    }
+}
+# Create a folder for the prediction files to be written into that will be submitted.
+dir.create("Results")
+setwd("./Results")
+pml_write_files(finalpreds)
+```
